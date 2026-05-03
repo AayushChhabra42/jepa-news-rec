@@ -6,71 +6,26 @@ import torch.nn.functional as F
 
 
 class RankingHead(nn.Module):
-    """MLP ranking head for click prediction.
-
-    Takes a user representation and a candidate article embedding,
-    and outputs a click probability score.
-
-    Supports two modes:
-      - "mlp": concat(z_user, z_article) → MLP → score
-      - "dot": dot(z_user, z_article) → score
-    """
-
-    def __init__(
-        self,
-        d_model: int = 128,
-        hidden_dim: int = 256,
-        dropout: float = 0.1,
-        mode: str = "mlp",
-    ):
+    def __init__(self, embed_dim=128, n_extra=3):
         super().__init__()
-        self.mode = mode
+        self.mlp = nn.Sequential(
+            # Fixed from embed_dim * 2 to embed_dim * 3 because x concatenates:
+            # z_user (dim) + z_article (dim) + z_user * z_article (dim) + extra (n_extra)
+            nn.Linear(embed_dim * 3 + n_extra, 256),
+            nn.GELU(),
+            nn.Linear(256, 1)
+        )
 
-        if mode == "mlp":
-            self.mlp = nn.Sequential(
-                nn.Linear(d_model * 2, hidden_dim),
-                nn.GELU(),
-                nn.Dropout(dropout),
-                nn.Linear(hidden_dim, d_model),
-                nn.GELU(),
-                nn.Dropout(dropout),
-                nn.Linear(d_model, 1),
-            )
-        # dot mode needs no parameters
-
-    def forward(
-        self,
-        z_user: torch.Tensor,
-        z_article: torch.Tensor,
-    ) -> torch.Tensor:
-        """Compute click score.
-
-        Args:
-            z_user: (batch, d_model) or (batch, 1, d_model).
-            z_article: (batch, d_model) or (batch, num_candidates, d_model).
-
-        Returns:
-            (batch,) or (batch, num_candidates) — click scores.
-        """
-        if self.mode == "dot":
-            if z_user.dim() == 2 and z_article.dim() == 3:
-                # (batch, 1, d) × (batch, d, num_cand) → (batch, num_cand)
-                return torch.bmm(
-                    z_user.unsqueeze(1), z_article.transpose(1, 2)
-                ).squeeze(1)
-            return (z_user * z_article).sum(dim=-1)
-
-        # MLP mode
+    def forward(self, z_user, z_article, extra):
+        # extra: [position, global_ctr, category_match]
+        
+        # We need to make sure z_user matches z_article shape if needed, like the original
         if z_user.dim() == 2 and z_article.dim() == 3:
-            # Expand z_user to match candidates
             num_cand = z_article.shape[1]
-            z_user_exp = z_user.unsqueeze(1).expand(-1, num_cand, -1)
-            combined = torch.cat([z_user_exp, z_article], dim=-1)
-            scores = self.mlp(combined).squeeze(-1)  # (batch, num_cand)
-            return scores
-
-        combined = torch.cat([z_user, z_article], dim=-1)
-        return self.mlp(combined).squeeze(-1)
+            z_user = z_user.unsqueeze(1).expand(-1, num_cand, -1)
+            
+        x = torch.cat([z_user, z_article, z_user * z_article, extra], dim=-1)
+        return self.mlp(x).squeeze(-1)
 
 
 class FineTuneModel(nn.Module):
