@@ -1,0 +1,25 @@
+# Core
+torch>=2.0.0
+numpy>=1.24.0
+pandas>=2.0.0
+pyyaml>=6.0
+h5py>=3.8.0
+tqdm>=4.65.0
+
+# NLP / Embeddings
+sentence-transformers>=2.2.0
+transformers>=4.30.0
+
+# Evaluation & Baselines
+scikit-learn>=1.2.0
+xgboost>=1.7.0
+
+# Retrieval
+faiss-cpu>=1.7.4
+
+# Logging
+wandb>=0.15.0
+
+# Utilities
+requests>=2.28.0
+zipfile36>=0.1.3

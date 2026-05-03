@@ -1,0 +1,95 @@
+# JEPA News Recommendation System — Configuration
+# Target: MIND-small, Colab execution
+
+data:
+  dataset: "mind-small"  # "mind-small" or "mind-large"
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  mind_small_train_url: "https://mind201910small.blob.core.windows.net/release/MINDsmall_train.zip"
+  mind_small_val_url: "https://mind201910small.blob.core.windows.net/release/MINDsmall_dev.zip"
+  max_seq_len: 50
+  min_history_len: 5        # For pretraining only; eval includes all users
+  minilm_model: "sentence-transformers/all-MiniLM-L6-v2"
+  minilm_dim: 384
+
+model:
+  item_embed_dim: 128
+  category_embed_dim: 16
+  subcategory_embed_dim: 16
+  entity_flag_dim: 8
+  num_categories: 18
+  num_subcategories: 300     # ~285 in MIND, padded
+
+  context_encoder:
+    num_layers: 4
+    d_model: 128
+    nhead: 4
+    d_ff: 512
+    dropout: 0.1
+
+  predictor:
+    num_layers: 2
+    d_model: 128
+    nhead: 4
+    d_ff: 256                # Narrower than context encoder — bottleneck
+    dropout: 0.1
+
+  ranking_head:
+    hidden_dim: 256
+    dropout: 0.1
+
+masking:
+  strategy: "temporal"       # Always mask from the end
+  min_mask_ratio: 0.2
+  max_mask_ratio: 0.4
+
+ema:
+  tau_start: 0.996
+  tau_end: 0.9999
+  schedule: "cosine"
+
+simcse:
+  temperature: 0.05
+  epochs: 5
+  lr: 1e-4
+  batch_size: 256
+  hard_negatives: true       # Use displayed-but-not-clicked as hard negatives
+
+jepa:
+  epochs: 10
+  lr: 1e-4
+  item_embed_lr_scale: 0.1   # Item embedding LR = lr * this scale
+  weight_decay: 0.01
+  batch_size: 256
+  optimizer: "adamw"
+  warmup_steps: 500
+  collapse_threshold: 0.05
+  collapse_check_interval: 500
+
+  # VICReg regularisation
+  vicreg_lambda_var: 1.0
+  vicreg_lambda_cov: 0.04
+
+finetune:
+  epochs: 3
+  lr: 5e-5
+  batch_size: 128
+  neg_sample_ratio: 4        # Negatives per positive in each impression
+  scoring: "mlp"             # "mlp" or "dot"
+
+xgboost:
+  objective: "rank:pairwise"
+  eta: 0.1
+  max_depth: 6
+  n_estimators: 500
+  eval_metric: "ndcg@5"
+
+evaluation:
+  metrics: ["auc", "mrr", "ndcg@5", "ndcg@10"]
+  history_slices: [5, 20]    # Boundaries for cold/warm/heavy user groups
+
+logging:
+  backend: "wandb"           # "wandb" or "tensorboard"
+  project: "jepa-news-rec"
+  log_interval: 100
+  checkpoint_dir: "checkpoints"
