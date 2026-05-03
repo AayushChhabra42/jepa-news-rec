@@ -34,7 +34,7 @@ def download_mind_kaggle(raw_dir: str = "data/raw", dataset: str = "mind-small")
     """Download MIND-small from Kaggle and organise into train/dev splits.
 
     The Kaggle mirror (arashnic/mind-news-dataset) contains both
-    MINDsmall_train.zip and MINDsmall_dev.zip inside a single download.
+    MINDsmall_train and MINDsmall_dev data.
 
     Uses the kaggle Python API directly (not the CLI, which requires
     __main__.py that the kaggle package doesn't provide).
@@ -52,14 +52,14 @@ def download_mind_kaggle(raw_dir: str = "data/raw", dataset: str = "mind-small")
     dev_dir = os.path.join(raw_dir, dataset, "dev")
 
     # Skip if already downloaded and extracted
-    if (os.path.isdir(train_dir) and os.listdir(train_dir) and
-            os.path.isdir(dev_dir) and os.listdir(dev_dir)):
+    if (os.path.isdir(train_dir) and os.path.isfile(os.path.join(train_dir, "news.tsv")) and
+            os.path.isdir(dev_dir) and os.path.isfile(os.path.join(dev_dir, "news.tsv"))):
         print(f"[✓] Dataset already extracted:")
         print(f"    train: {train_dir}")
         print(f"    dev:   {dev_dir}")
         return {"train": train_dir, "dev": dev_dir}
 
-    # Download from Kaggle using the Python API
+    # Download from Kaggle using the Python API — unzip=True to extract all
     kaggle_dl_dir = os.path.join(raw_dir, "kaggle_download")
     os.makedirs(kaggle_dl_dir, exist_ok=True)
 
@@ -69,81 +69,79 @@ def download_mind_kaggle(raw_dir: str = "data/raw", dataset: str = "mind-small")
     from kaggle.api.kaggle_api_extended import KaggleApi
     api = KaggleApi()
     api.authenticate()
-    api.dataset_download_files(KAGGLE_DATASET, path=kaggle_dl_dir, unzip=False)
+    api.dataset_download_files(KAGGLE_DATASET, path=kaggle_dl_dir, unzip=True)
 
-    # Find the downloaded zip(s)
-    zips = glob.glob(os.path.join(kaggle_dl_dir, "*.zip"))
-    if not zips:
-        raise FileNotFoundError(f"No zip files found in {kaggle_dl_dir} after download.")
-
-    # Extract the outer zip (Kaggle wraps everything in one zip)
-    print(f"[⤓] Extracting outer archive...")
-    staging_dir = os.path.join(raw_dir, "staging")
-    os.makedirs(staging_dir, exist_ok=True)
-    for z in zips:
-        with zipfile.ZipFile(z, "r") as zf:
-            zf.extractall(staging_dir)
-
-    # Now look for MINDsmall_train.zip and MINDsmall_dev.zip inside staging
-    # The Kaggle dataset may have them directly or inside a subfolder
-    inner_zips = {}
-    for root, dirs, files in os.walk(staging_dir):
+    # Debug: show everything that was extracted
+    print(f"\n[i] Contents of {kaggle_dl_dir}:")
+    all_files = []
+    for root, dirs, files in os.walk(kaggle_dl_dir):
         for f in files:
-            fl = f.lower()
-            if "train" in fl and fl.endswith(".zip"):
-                inner_zips["train"] = os.path.join(root, f)
-            elif ("dev" in fl or "valid" in fl) and fl.endswith(".zip"):
-                inner_zips["dev"] = os.path.join(root, f)
+            fpath = os.path.join(root, f)
+            rel = os.path.relpath(fpath, kaggle_dl_dir)
+            all_files.append((rel, fpath))
+            print(f"    {rel}")
 
-    # Also check if the TSV files are directly in staging (no inner zips)
-    tsv_files = glob.glob(os.path.join(staging_dir, "**", "*.tsv"), recursive=True)
-
+    # --- Strategy 1: Look for directories containing news.tsv ---
     extracted_dirs = {}
+    for rel, fpath in all_files:
+        if os.path.basename(fpath).lower() == "news.tsv":
+            parent = os.path.dirname(fpath)
+            parent_name = os.path.basename(parent).lower()
+            # Also check grandparent in case structure is like MINDsmall_train/news.tsv
+            grandparent_name = os.path.basename(os.path.dirname(parent)).lower()
+            combined = f"{grandparent_name}/{parent_name}"
 
-    if inner_zips:
-        # Extract inner zips
-        for split, zip_path in inner_zips.items():
-            extract_dir = os.path.join(raw_dir, dataset, split)
-            os.makedirs(extract_dir, exist_ok=True)
-            print(f"[⤓] Extracting {split} from {os.path.basename(zip_path)}...")
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                zf.extractall(extract_dir)
-            extracted_dirs[split] = extract_dir
-            print(f"[✓] {split} → {extract_dir}")
-    elif tsv_files:
-        # TSVs are directly available — figure out the split structure
-        print(f"[i] Found {len(tsv_files)} TSV files directly in staging.")
-        # Try to find train/dev structure
-        for tsv in tsv_files:
-            rel = os.path.relpath(tsv, staging_dir).lower()
-            if "train" in rel:
-                dest_dir = train_dir
+            if "train" in parent_name or "train" in grandparent_name:
                 split = "train"
-            elif "dev" in rel or "valid" in rel:
-                dest_dir = dev_dir
+            elif "dev" in combined or "valid" in combined or "test" in combined:
                 split = "dev"
             else:
-                continue
-            os.makedirs(dest_dir, exist_ok=True)
-            dest = os.path.join(dest_dir, os.path.basename(tsv))
-            shutil.copy2(tsv, dest)
-            extracted_dirs[split] = dest_dir
+                # Unknown — check the relative path
+                if "train" in rel.lower():
+                    split = "train"
+                elif "dev" in rel.lower() or "valid" in rel.lower():
+                    split = "dev"
+                else:
+                    continue
 
-        if not extracted_dirs:
-            # Fallback: just copy everything to train
-            print("[!] Could not determine split structure. Copying all to train/")
-            os.makedirs(train_dir, exist_ok=True)
-            for tsv in tsv_files:
-                shutil.copy2(tsv, train_dir)
-            extracted_dirs["train"] = train_dir
-    else:
+            dest_dir = train_dir if split == "train" else dev_dir
+            if dest_dir not in [v for v in extracted_dirs.values()]:
+                # Copy entire directory contents
+                os.makedirs(dest_dir, exist_ok=True)
+                for item in os.listdir(parent):
+                    src = os.path.join(parent, item)
+                    dst = os.path.join(dest_dir, item)
+                    if os.path.isfile(src):
+                        shutil.copy2(src, dst)
+                extracted_dirs[split] = dest_dir
+                print(f"[✓] {split} → {dest_dir} (from {parent})")
+
+    # --- Strategy 2: Look for inner zip files if Strategy 1 found nothing ---
+    if not extracted_dirs:
+        print("[i] No news.tsv found directly. Looking for inner zip files...")
+        inner_zips = {}
+        for rel, fpath in all_files:
+            fl = os.path.basename(fpath).lower()
+            if fl.endswith(".zip"):
+                if "train" in fl:
+                    inner_zips["train"] = fpath
+                elif "dev" in fl or "valid" in fl:
+                    inner_zips["dev"] = fpath
+
+        for split, zip_path in inner_zips.items():
+            dest = train_dir if split == "train" else dev_dir
+            os.makedirs(dest, exist_ok=True)
+            print(f"[⤓] Extracting {split} from {os.path.basename(zip_path)}...")
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(dest)
+            extracted_dirs[split] = dest
+            print(f"[✓] {split} → {dest}")
+
+    if not extracted_dirs:
         raise FileNotFoundError(
-            f"Could not find MIND data files in {staging_dir}. "
-            f"Contents: {os.listdir(staging_dir)}"
+            f"Could not find MIND data files (news.tsv) anywhere in {kaggle_dl_dir}. "
+            f"Files found: {[r for r, _ in all_files]}"
         )
-
-    # Clean up staging
-    shutil.rmtree(staging_dir, ignore_errors=True)
 
     print(f"\n[✓] MIND dataset ready:")
     for split, path in extracted_dirs.items():
