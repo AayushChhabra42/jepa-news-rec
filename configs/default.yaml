@@ -68,8 +68,8 @@ jepa:
   collapse_check_interval: 500
 
   # VICReg regularisation
-  vicreg_lambda_var: 1.0
-  vicreg_lambda_cov: 0.04
+  vicreg_lambda_var: 25.0
+  vicreg_lambda_cov: 1.0
 
 finetune:
   epochs: 4
