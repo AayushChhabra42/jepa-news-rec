@@ -122,6 +122,7 @@ def finetune(
     max_seq_len: int = 50,
     neg_sample_ratio: int = 4,
     scoring_mode: str = "mlp",
+    predictor_type: str = "transformer",
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
 ):
     """Fine-tune ranking head on labeled impressions."""
@@ -158,6 +159,7 @@ def finetune(
             "d_ff": 512, "dropout": 0.1, "max_seq_len": max_seq_len,
         },
         predictor_cfg={
+            "type": predictor_type,
             "d_model": 128, "nhead": 4, "num_layers": 2,
             "d_ff": 256, "dropout": 0.1, "max_target_len": max_seq_len,
         },
@@ -251,6 +253,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--scoring-mode", default="mlp", choices=["mlp", "dot"])
+    parser.add_argument("--predictor-type", default="transformer", choices=["transformer", "mlp"])
     args = parser.parse_args()
 
     finetune(
@@ -261,4 +264,5 @@ if __name__ == "__main__":
         lr=args.lr,
         batch_size=args.batch_size,
         scoring_mode=args.scoring_mode,
+        predictor_type=args.predictor_type,
     )

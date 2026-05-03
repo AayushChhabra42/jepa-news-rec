@@ -28,6 +28,7 @@ def evaluate_jepa(
     max_seq_len: int = 50,
     batch_size: int = 128,
     scoring_mode: str = "mlp",
+    predictor_type: str = "transformer",
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
 ) -> dict:
     """Evaluate fine-tuned JEPA model on dev set."""
@@ -66,6 +67,7 @@ def evaluate_jepa(
             "d_ff": 512, "dropout": 0.0, "max_seq_len": max_seq_len,
         },
         predictor_cfg={
+            "type": predictor_type,
             "d_model": 128, "nhead": 4, "num_layers": 2,
             "d_ff": 256, "dropout": 0.0, "max_target_len": max_seq_len,
         },
@@ -236,6 +238,8 @@ if __name__ == "__main__":
     parser.add_argument("--jepa-checkpoint", default="checkpoints/finetuned_model.pt")
     parser.add_argument("--xgb-model", default="checkpoints/xgb_ranker.json")
     parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument("--predictor-type", default="transformer", choices=["transformer", "mlp"])
+    parser.add_argument("--scoring-mode", default="mlp", choices=["mlp", "dot"])
     args = parser.parse_args()
 
     jepa_results = None
@@ -243,7 +247,8 @@ if __name__ == "__main__":
 
     if args.model in ["jepa", "both"]:
         jepa_results = evaluate_jepa(
-            args.processed_dir, args.jepa_checkpoint, batch_size=args.batch_size
+            args.processed_dir, args.jepa_checkpoint, batch_size=args.batch_size,
+            predictor_type=args.predictor_type, scoring_mode=args.scoring_mode
         )
 
     if args.model in ["xgb", "both"]:

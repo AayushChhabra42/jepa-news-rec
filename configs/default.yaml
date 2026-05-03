@@ -28,6 +28,7 @@ model:
     dropout: 0.1
 
   predictor:
+    type: "mlp"      # "transformer" or "mlp"
     num_layers: 2
     d_model: 128
     nhead: 4

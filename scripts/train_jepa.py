@@ -79,6 +79,7 @@ def train_jepa(
     collapse_threshold: float = 0.05,
     collapse_check_interval: int = 500,
     warmup_steps: int = 500,
+    predictor_type: str = "transformer",
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
 ):
     """Train JEPA on user click sequences."""
@@ -126,6 +127,7 @@ def train_jepa(
             "d_ff": 512, "dropout": 0.1, "max_seq_len": max_seq_len,
         },
         predictor_cfg={
+            "type": predictor_type,
             "d_model": 128, "nhead": 4, "num_layers": 2,
             "d_ff": 256, "dropout": 0.1, "max_target_len": max_seq_len,
         },
@@ -300,6 +302,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--max-seq-len", type=int, default=50)
+    parser.add_argument("--predictor-type", default="transformer", choices=["transformer", "mlp"])
     args = parser.parse_args()
 
     train_jepa(
@@ -310,4 +313,5 @@ if __name__ == "__main__":
         lr=args.lr,
         batch_size=args.batch_size,
         max_seq_len=args.max_seq_len,
+        predictor_type=args.predictor_type,
     )

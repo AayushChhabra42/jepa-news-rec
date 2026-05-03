@@ -6,25 +6,49 @@ import torch.nn.functional as F
 
 
 class RankingHead(nn.Module):
-    def __init__(self, embed_dim=128, n_extra=3):
+    def __init__(self, d_model=128, hidden_dim=256, dropout=0.1, n_extra=0, mode="mlp"):
         super().__init__()
-        self.mlp = nn.Sequential(
-            # Fixed from embed_dim * 2 to embed_dim * 3 because x concatenates:
-            # z_user (dim) + z_article (dim) + z_user * z_article (dim) + extra (n_extra)
-            nn.Linear(embed_dim * 3 + n_extra, 256),
-            nn.GELU(),
-            nn.Linear(256, 1)
-        )
+        self.mode = mode
+        self.n_extra = n_extra
 
-    def forward(self, z_user, z_article, extra):
-        # extra: [position, global_ctr, category_match]
-        
-        # We need to make sure z_user matches z_article shape if needed, like the original
-        if z_user.dim() == 2 and z_article.dim() == 3:
+        if mode == "mlp":
+            # x concatenates: z_user (dim) + z_article (dim) + z_user * z_article (dim) + extra (n_extra)
+            input_dim = d_model * 3 + n_extra
+            self.mlp = nn.Sequential(
+                nn.Linear(input_dim, hidden_dim),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim, 1)
+            )
+        # For "dot" mode, no parameters needed other than maybe a bias or temperature
+
+    def forward(self, z_user, z_article, extra=None):
+        """
+        Args:
+            z_user: (batch, d_model) or (batch, num_cand, d_model)
+            z_article: (batch, num_cand, d_model)
+            extra: (batch, num_cand, n_extra) optional
+        """
+        if z_user.dim() == 2:
             num_cand = z_article.shape[1]
             z_user = z_user.unsqueeze(1).expand(-1, num_cand, -1)
-            
-        x = torch.cat([z_user, z_article, z_user * z_article, extra], dim=-1)
+
+        if self.mode == "dot":
+            # Simple dot product between user and article embeddings
+            scores = (z_user * z_article).sum(dim=-1)  # (batch, num_cand)
+            return scores
+
+        # MLP mode
+        inputs = [z_user, z_article, z_user * z_article]
+        if extra is not None and self.n_extra > 0:
+            inputs.append(extra)
+        elif self.n_extra > 0:
+            # If extra is expected but not provided, pad with zeros
+            batch_size, num_cand, _ = z_article.shape
+            extra_zeros = torch.zeros(batch_size, num_cand, self.n_extra, device=z_article.device)
+            inputs.append(extra_zeros)
+
+        x = torch.cat(inputs, dim=-1)
         return self.mlp(x).squeeze(-1)
 
 
@@ -58,20 +82,7 @@ class FineTuneModel(nn.Module):
         entity_flags: torch.Tensor,
         labels: torch.Tensor,
     ) -> dict:
-        """Forward pass for fine-tuning.
-
-        Args:
-            history_ids: (batch, seq_len) — user click history.
-            history_mask: (batch, seq_len) — True for valid history positions.
-            candidate_ids: (batch, num_candidates) — candidate article indices.
-            cat_ids: (num_articles,) — global category IDs.
-            subcat_ids: (num_articles,) — global subcategory IDs.
-            entity_flags: (num_articles,) — global entity flags.
-            labels: (batch, num_candidates) — 1=clicked, 0=not clicked.
-
-        Returns:
-            Dict with 'loss', 'scores'.
-        """
+        """Forward pass for fine-tuning."""
         # Get user representation (frozen)
         with torch.no_grad():
             z_user = self.jepa.get_user_representation(
@@ -87,9 +98,10 @@ class FineTuneModel(nn.Module):
             )  # (batch, num_candidates, d_model)
 
         # Score with ranking head (trainable)
+        # We pass only user and candidate representations; extra features can be added if available
         scores = self.ranking_head(z_user, z_candidates)  # (batch, num_candidates)
 
-        # BCE loss
+        # BCE loss with logits
         loss = F.binary_cross_entropy_with_logits(scores, labels.float())
 
         return {"loss": loss, "scores": scores.detach()}
