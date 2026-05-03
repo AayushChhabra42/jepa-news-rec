@@ -132,8 +132,8 @@ def evaluate_jepa(
             )
 
             scores = output["scores"].cpu().numpy()
-            labels_np = labels.numpy()
-            cand_mask_np = cand_mask.numpy()
+            labels_np = labels.cpu().numpy()
+            cand_mask_np = cand_mask.cpu().numpy()
 
             for i in range(scores.shape[0]):
                 valid = cand_mask_np[i]
