@@ -81,27 +81,54 @@ class FineTuneModel(nn.Module):
         subcat_ids: torch.Tensor,
         entity_flags: torch.Tensor,
         labels: torch.Tensor,
+        cand_mask: torch.Tensor | None = None,
+        cand_pos: torch.Tensor | None = None,
+        global_ctr: torch.Tensor | None = None,
     ) -> dict:
-        """Forward pass for fine-tuning."""
-        # Get user representation (frozen)
-        with torch.no_grad():
-            z_user = self.jepa.get_user_representation(
-                history_ids, history_mask, cat_ids, subcat_ids, entity_flags
-            )  # (batch, d_model)
+        """Forward pass for fine-tuning with BPR Loss."""
+        # Get user representation (frozen initially, unfrozen later)
+        # Note: no torch.no_grad() here; relies on requires_grad state.
+        z_user = self.jepa.get_user_representation(
+            history_ids, history_mask, cat_ids, subcat_ids, entity_flags, global_ctr
+        )  # (batch, d_model)
 
-            # Get candidate embeddings (frozen)
-            cand_cats = cat_ids[candidate_ids]
-            cand_subcats = subcat_ids[candidate_ids]
-            cand_ent = entity_flags[candidate_ids]
-            z_candidates = self.jepa.item_encoder(
-                candidate_ids, cand_cats, cand_subcats, cand_ent
-            )  # (batch, num_candidates, d_model)
+        # Get candidate embeddings
+        cand_cats = cat_ids[candidate_ids]
+        cand_subcats = subcat_ids[candidate_ids]
+        cand_ent = entity_flags[candidate_ids]
+        
+        ctr = None
+        if global_ctr is not None:
+            ctr = global_ctr[candidate_ids]
 
-        # Score with ranking head (trainable)
-        # We pass only user and candidate representations; extra features can be added if available
+        z_candidates = self.jepa.item_encoder(
+            candidate_ids, cand_cats, cand_subcats, cand_ent, global_ctr=ctr, position=cand_pos
+        )  # (batch, num_candidates, d_model)
+
+        # Score with ranking head
         scores = self.ranking_head(z_user, z_candidates)  # (batch, num_candidates)
 
-        # BCE loss with logits
-        loss = F.binary_cross_entropy_with_logits(scores, labels.float())
+        if cand_mask is None:
+            # Fallback to BCE if cand_mask is missing (e.g. inference without valid mask)
+            loss = F.binary_cross_entropy_with_logits(scores, labels.float())
+            return {"loss": loss, "scores": scores.detach()}
+
+        # BPR Loss implementation
+        # Find positive and negative items
+        pos_mask = (labels == 1) & cand_mask
+        neg_mask = (labels == 0) & cand_mask
+
+        # Compute pairwise score differences
+        pos_scores = scores.unsqueeze(-1)  # (batch, num_cand, 1)
+        neg_scores = scores.unsqueeze(1)   # (batch, 1, num_cand)
+        diff = pos_scores - neg_scores     # (batch, num_cand, num_cand)
+
+        # Valid pairs mask
+        valid_pairs = pos_mask.unsqueeze(-1) & neg_mask.unsqueeze(1) # (batch, num_cand, num_cand)
+
+        if valid_pairs.sum() > 0:
+            loss = -F.logsigmoid(diff)[valid_pairs].mean()
+        else:
+            loss = torch.tensor(0.0, device=scores.device, requires_grad=True)
 
         return {"loss": loss, "scores": scores.detach()}
