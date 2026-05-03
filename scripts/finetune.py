@@ -17,6 +17,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models.item_encoder import ItemEncoder
 from models.jepa import JEPA
 from models.ranking_head import RankingHead, FineTuneModel
+from baselines.xgboost_ranker import compute_global_ctr
+from data.preprocess import parse_behaviors_tsv
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +68,8 @@ class ImpressionDataset(Dataset):
         candidates = sample["candidates"]
         labels = sample["labels"]
 
-        positives = [(c, l) for c, l in zip(candidates, labels) if l == 1]
-        negatives = [(c, l) for c, l in zip(candidates, labels) if l == 0]
+        positives = [(pos, c, l) for pos, (c, l) in enumerate(zip(candidates, labels)) if l == 1]
+        negatives = [(pos, c, l) for pos, (c, l) in enumerate(zip(candidates, labels)) if l == 0]
 
         # Keep all positives, subsample negatives
         max_neg = len(positives) * self.neg_sample_ratio
@@ -80,8 +82,9 @@ class ImpressionDataset(Dataset):
 
         return {
             "history": sample["history"],
-            "candidates": [c for c, l in selected],
-            "labels": [l for c, l in selected],
+            "candidates": [c for pos, c, l in selected],
+            "labels": [l for pos, c, l in selected],
+            "positions": [pos for pos, c, l in selected],
         }
 
 
@@ -95,6 +98,7 @@ def collate_impressions(batch, max_seq_len=50):
     candidate_ids = torch.zeros(batch_size, max_cand, dtype=torch.long)
     labels = torch.zeros(batch_size, max_cand, dtype=torch.float)
     cand_mask = torch.zeros(batch_size, max_cand, dtype=torch.bool)
+    cand_pos = torch.zeros(batch_size, max_cand, dtype=torch.long)
 
     for i, sample in enumerate(batch):
         h = sample["history"]
@@ -104,12 +108,14 @@ def collate_impressions(batch, max_seq_len=50):
 
         c = sample["candidates"]
         l = sample["labels"]
+        p = sample["positions"]
         clen = len(c)
         candidate_ids[i, :clen] = torch.tensor(c)
         labels[i, :clen] = torch.tensor(l, dtype=torch.float)
         cand_mask[i, :clen] = True
+        cand_pos[i, :clen] = torch.tensor(p, dtype=torch.long)
 
-    return history_ids, history_mask, candidate_ids, labels, cand_mask
+    return history_ids, history_mask, candidate_ids, labels, cand_mask, cand_pos
 
 
 def finetune(
@@ -143,6 +149,20 @@ def finetune(
     cat_ids = torch.tensor(cat_ids_np, dtype=torch.long, device=device)
     subcat_ids = torch.tensor(subcat_ids_np, dtype=torch.long, device=device)
     entity_flags = torch.tensor(entity_flags_np, dtype=torch.float, device=device)
+
+    # Compute Global CTR
+    print("Computing global CTR...")
+    raw_dir = processed_dir.replace("processed", "raw")
+    dataset_name = "mind-small"
+    if "mind-large" in processed_dir: dataset_name = "mind-large"
+    train_behaviors = parse_behaviors_tsv(
+        os.path.join(raw_dir, dataset_name, "train", "behaviors.tsv")
+    )
+    global_ctr_dict = compute_global_ctr(train_behaviors, vocabs["news_id2idx"])
+    global_ctr_np = np.zeros(len(vocabs["news_id2idx"]), dtype=np.float32)
+    for idx, ctr in global_ctr_dict.items():
+        global_ctr_np[idx] = ctr
+    global_ctr_tensor = torch.tensor(global_ctr_np, dtype=torch.float, device=device)
 
     # Build JEPA model and load weights
     print("Building model...")
@@ -196,16 +216,29 @@ def finetune(
     print("=" * 60)
 
     for epoch in range(epochs):
+        # 2-stage unfreezing
+        if epoch == 2:
+            print("\n  [Unfreezing JEPA encoder for differential finetuning]")
+            for param in ft_model.jepa.parameters():
+                param.requires_grad_(True)
+            optimizer = AdamW([
+                {"params": ft_model.jepa.item_encoder.parameters(), "lr": lr * 0.01},
+                {"params": ft_model.jepa.context_encoder.parameters(), "lr": lr * 0.1},
+                {"params": ft_model.ranking_head.parameters(), "lr": lr}
+            ], weight_decay=0.01)
+
         ft_model.train()
         epoch_loss = 0
         num_batches = 0
 
         pbar = tqdm(loader, desc=f"Epoch {epoch+1}/{epochs}")
-        for history_ids, history_mask, candidate_ids, labels, cand_mask in pbar:
+        for history_ids, history_mask, candidate_ids, labels, cand_mask, cand_pos in pbar:
             history_ids = history_ids.to(device)
             history_mask = history_mask.to(device)
             candidate_ids = candidate_ids.to(device)
             labels = labels.to(device)
+            cand_mask = cand_mask.to(device)
+            cand_pos = cand_pos.to(device)
 
             output = ft_model(
                 history_ids=history_ids,
@@ -215,6 +248,9 @@ def finetune(
                 subcat_ids=subcat_ids,
                 entity_flags=entity_flags,
                 labels=labels,
+                cand_mask=cand_mask,
+                cand_pos=cand_pos,
+                global_ctr=global_ctr_tensor,
             )
 
             loss = output["loss"]
