@@ -83,10 +83,10 @@ xgboost:
   eta: 0.1
   max_depth: 6
   n_estimators: 500
-  eval_metric: "ndcg@5"
+  eval_metric: "ndcg@20"
 
 evaluation:
-  metrics: ["auc", "mrr", "ndcg@5", "ndcg@10"]
+  metrics: ["auc", "mrr", "ndcg@5", "ndcg@10", "ndcg@20"]
   history_slices: [5, 20]    # Boundaries for cold/warm/heavy user groups
 
 logging:
