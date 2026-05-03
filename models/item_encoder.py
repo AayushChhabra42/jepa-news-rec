@@ -48,7 +48,8 @@ class ItemEncoder(nn.Module):
         self.subcat_embed = nn.Embedding(num_subcategories, subcat_embed_dim, padding_idx=0)
 
         # Final fusion
-        fused_dim = item_embed_dim + cat_embed_dim + subcat_embed_dim + 1  # +1 for entity flag
+        # text + cat + subcat + entity_flag (1) + global_ctr (1) + position (1)
+        fused_dim = item_embed_dim + cat_embed_dim + subcat_embed_dim + 3
         self.fusion = nn.Sequential(
             nn.Linear(fused_dim, item_embed_dim),
             nn.LayerNorm(item_embed_dim),
@@ -63,6 +64,8 @@ class ItemEncoder(nn.Module):
         cat_ids: torch.Tensor,
         subcat_ids: torch.Tensor,
         entity_flags: torch.Tensor,
+        global_ctr: torch.Tensor | None = None,
+        position: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Encode articles.
 
@@ -86,8 +89,18 @@ class ItemEncoder(nn.Module):
         # Entity flag — expand to match batch dims
         ent = entity_flags.unsqueeze(-1)            # (..., 1)
 
+        # Global CTR
+        if global_ctr is None:
+            global_ctr = torch.zeros_like(entity_flags)
+        ctr = global_ctr.unsqueeze(-1).float()      # (..., 1)
+
+        # Position
+        if position is None:
+            position = torch.zeros_like(entity_flags)
+        pos = position.unsqueeze(-1).float()        # (..., 1)
+
         # Fuse
-        fused = torch.cat([text, cat, subcat, ent], dim=-1)  # (..., 161)
+        fused = torch.cat([text, cat, subcat, ent, ctr, pos], dim=-1)  # (..., fused_dim)
         return self.fusion(fused)                   # (..., 128)
 
     def get_all_embeddings(
@@ -108,4 +121,4 @@ class ItemEncoder(nn.Module):
         """
         num_articles = cat_ids_all.shape[0]
         all_ids = torch.arange(num_articles, device=cat_ids_all.device)
-        return self.forward(all_ids, cat_ids_all, subcat_ids_all, entity_flags_all)
+        return self.forward(all_ids, cat_ids_all, subcat_ids_all, entity_flags_all, None, None)

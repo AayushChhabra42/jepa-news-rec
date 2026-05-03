@@ -20,6 +20,8 @@ from models.item_encoder import ItemEncoder
 from models.jepa import JEPA
 from utils.masking import apply_temporal_mask
 from utils.collapse_monitor import CollapseMonitor
+from baselines.xgboost_ranker import compute_global_ctr
+from data.preprocess import parse_behaviors_tsv
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +103,20 @@ def train_jepa(
     cat_ids = torch.tensor(cat_ids_np, dtype=torch.long, device=device)
     subcat_ids = torch.tensor(subcat_ids_np, dtype=torch.long, device=device)
     entity_flags = torch.tensor(entity_flags_np, dtype=torch.float, device=device)
+
+    # Compute Global CTR
+    print("Computing global CTR...")
+    raw_dir = processed_dir.replace("processed", "raw")
+    dataset_name = "mind-small" # Hardcoded or get from config if available.
+    if "mind-large" in processed_dir: dataset_name = "mind-large"
+    train_behaviors = parse_behaviors_tsv(
+        os.path.join(raw_dir, dataset_name, "train", "behaviors.tsv")
+    )
+    global_ctr_dict = compute_global_ctr(train_behaviors, vocabs["news_id2idx"])
+    global_ctr_np = np.zeros(len(vocabs["news_id2idx"]), dtype=np.float32)
+    for idx, ctr in global_ctr_dict.items():
+        global_ctr_np[idx] = ctr
+    global_ctr_tensor = torch.tensor(global_ctr_np, dtype=torch.float, device=device)
 
     # --- Build model ---
     print("Building JEPA model...")
@@ -214,6 +230,7 @@ def train_jepa(
                 cat_ids=cat_ids,
                 subcat_ids=subcat_ids,
                 entity_flags=entity_flags,
+                global_ctr=global_ctr_tensor,
             )
 
             loss = output["loss"]
@@ -248,7 +265,7 @@ def train_jepa(
                     for i in range(eval_item_ids.shape[0]):
                         eval_mask[i, :eval_lengths[i]] = True
                     z_users = model.get_user_representation(
-                        eval_item_ids, eval_mask, cat_ids, subcat_ids, entity_flags
+                        eval_item_ids, eval_mask, cat_ids, subcat_ids, entity_flags, global_ctr_tensor
                     )
                 metrics = collapse_monitor.check(z_users, global_step)
                 if metrics["collapsed"]:

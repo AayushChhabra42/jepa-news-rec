@@ -18,6 +18,8 @@ from models.jepa import JEPA
 from models.ranking_head import RankingHead, FineTuneModel
 from scripts.finetune import ImpressionDataset, collate_impressions
 from evaluation.metrics import evaluate_all, print_results
+from baselines.xgboost_ranker import compute_global_ctr
+from data.preprocess import parse_behaviors_tsv
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,20 @@ def evaluate_jepa(
     cat_ids = torch.tensor(cat_ids_np, dtype=torch.long, device=device)
     subcat_ids = torch.tensor(subcat_ids_np, dtype=torch.long, device=device)
     entity_flags = torch.tensor(entity_flags_np, dtype=torch.float, device=device)
+
+    # Compute Global CTR
+    print("Computing global CTR...")
+    raw_dir = processed_dir.replace("processed", "raw")
+    dataset_name = "mind-small"
+    if "mind-large" in processed_dir: dataset_name = "mind-large"
+    train_behaviors = parse_behaviors_tsv(
+        os.path.join(raw_dir, dataset_name, "train", "behaviors.tsv")
+    )
+    global_ctr_dict = compute_global_ctr(train_behaviors, vocabs["news_id2idx"])
+    global_ctr_np = np.zeros(len(vocabs["news_id2idx"]), dtype=np.float32)
+    for idx, ctr in global_ctr_dict.items():
+        global_ctr_np[idx] = ctr
+    global_ctr_tensor = torch.tensor(global_ctr_np, dtype=torch.float, device=device)
 
     # Build model
     item_encoder = ItemEncoder(
@@ -94,11 +110,13 @@ def evaluate_jepa(
     history_lengths = []
 
     with torch.no_grad():
-        for history_ids, history_mask, candidate_ids, labels, cand_mask in tqdm(loader, desc="Evaluating JEPA"):
+        for history_ids, history_mask, candidate_ids, labels, cand_mask, cand_pos in tqdm(loader, desc="Evaluating JEPA"):
             history_ids = history_ids.to(device)
             history_mask = history_mask.to(device)
             candidate_ids = candidate_ids.to(device)
             labels_dev = labels.to(device)
+            cand_mask = cand_mask.to(device)
+            cand_pos = cand_pos.to(device)
 
             output = ft_model(
                 history_ids=history_ids,
@@ -108,6 +126,9 @@ def evaluate_jepa(
                 subcat_ids=subcat_ids,
                 entity_flags=entity_flags,
                 labels=labels_dev,
+                cand_mask=cand_mask,
+                cand_pos=cand_pos,
+                global_ctr=global_ctr_tensor,
             )
 
             scores = output["scores"].cpu().numpy()

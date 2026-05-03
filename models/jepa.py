@@ -71,6 +71,9 @@ class JEPA(nn.Module):
         cat_ids: torch.Tensor,
         subcat_ids: torch.Tensor,
         entity_flags: torch.Tensor,
+        global_ctr: torch.Tensor | None = None,
+        ctx_pos: torch.Tensor | None = None,
+        tgt_pos: torch.Tensor | None = None,
     ) -> dict:
         """Forward pass for JEPA pretraining.
 
@@ -82,13 +85,16 @@ class JEPA(nn.Module):
             cat_ids: (num_articles,) — global category IDs.
             subcat_ids: (num_articles,) — global subcategory IDs.
             entity_flags: (num_articles,) — global entity flags.
+            global_ctr: (num_articles,) — global CTR.
+            ctx_pos: (batch, max_seq_len) — optional positions for context.
+            tgt_pos: (batch, max_seq_len) — optional positions for target.
 
         Returns:
             Dict with 'loss', 'pred_loss', 'vicreg_loss', and metrics.
         """
         # --- Context path ---
         ctx_embeds = self._encode_items(
-            self.item_encoder, ctx_ids, cat_ids, subcat_ids, entity_flags
+            self.item_encoder, ctx_ids, cat_ids, subcat_ids, entity_flags, global_ctr, ctx_pos
         )  # (batch, max_seq_len, d_model)
 
         ctx_padding = ~ctx_mask  # True = pad
@@ -97,7 +103,7 @@ class JEPA(nn.Module):
         # --- Target path (no gradients) ---
         with torch.no_grad():
             tgt_embeds = self._encode_items(
-                self.target_item_encoder, tgt_ids, cat_ids, subcat_ids, entity_flags
+                self.target_item_encoder, tgt_ids, cat_ids, subcat_ids, entity_flags, global_ctr, tgt_pos
             )
             tgt_padding = ~tgt_mask
             tgt_out = self.target_encoder(tgt_embeds, padding_mask=tgt_padding)
@@ -143,13 +149,20 @@ class JEPA(nn.Module):
         cat_ids: torch.Tensor,
         subcat_ids: torch.Tensor,
         entity_flags: torch.Tensor,
+        global_ctr: torch.Tensor | None = None,
+        positions: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Look up item features and encode."""
         # Gather per-item features
         cats = cat_ids[item_ids]            # (batch, seq_len)
         subcats = subcat_ids[item_ids]
         ent_flags = entity_flags[item_ids]
-        return encoder(item_ids, cats, subcats, ent_flags)
+        
+        ctr = None
+        if global_ctr is not None:
+            ctr = global_ctr[item_ids]
+            
+        return encoder(item_ids, cats, subcats, ent_flags, global_ctr=ctr, position=positions)
 
     def _compute_prediction_loss(
         self,
@@ -197,6 +210,8 @@ class JEPA(nn.Module):
         cat_ids: torch.Tensor,
         subcat_ids: torch.Tensor,
         entity_flags: torch.Tensor,
+        global_ctr: torch.Tensor | None = None,
+        positions: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Compute user representation from click history (for inference).
 
@@ -211,7 +226,7 @@ class JEPA(nn.Module):
             (batch, d_model) — user embeddings.
         """
         embeds = self._encode_items(
-            self.item_encoder, item_ids, cat_ids, subcat_ids, entity_flags
+            self.item_encoder, item_ids, cat_ids, subcat_ids, entity_flags, global_ctr, positions
         )
         pad = ~padding_mask
         ctx_out = self.context_encoder(embeds, padding_mask=pad)
