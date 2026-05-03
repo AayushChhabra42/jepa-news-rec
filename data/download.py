@@ -49,15 +49,12 @@ def download_mind_kaggle(raw_dir: str = "data/raw", dataset: str = "mind-small")
     _ensure_kaggle()
 
     train_dir = os.path.join(raw_dir, dataset, "train")
-    dev_dir = os.path.join(raw_dir, dataset, "dev")
 
     # Skip if already downloaded and extracted
-    if (os.path.isdir(train_dir) and os.path.isfile(os.path.join(train_dir, "news.tsv")) and
-            os.path.isdir(dev_dir) and os.path.isfile(os.path.join(dev_dir, "news.tsv"))):
+    if (os.path.isdir(train_dir) and os.path.isfile(os.path.join(train_dir, "news.tsv"))):
         print(f"[✓] Dataset already extracted:")
         print(f"    train: {train_dir}")
-        print(f"    dev:   {dev_dir}")
-        return {"train": train_dir, "dev": dev_dir}
+        return {"train": train_dir}
 
     # Download from Kaggle using the Python API — unzip=True to extract all
     kaggle_dl_dir = os.path.join(raw_dir, "kaggle_download")
@@ -99,12 +96,10 @@ def download_mind_kaggle(raw_dir: str = "data/raw", dataset: str = "mind-small")
                 # Unknown — check the relative path
                 if "train" in rel.lower():
                     split = "train"
-                elif "dev" in rel.lower() or "valid" in rel.lower():
-                    split = "dev"
                 else:
                     continue
 
-            dest_dir = train_dir if split == "train" else dev_dir
+            dest_dir = train_dir
             if dest_dir not in [v for v in extracted_dirs.values()]:
                 # Copy entire directory contents
                 os.makedirs(dest_dir, exist_ok=True)
@@ -125,11 +120,9 @@ def download_mind_kaggle(raw_dir: str = "data/raw", dataset: str = "mind-small")
             if fl.endswith(".zip"):
                 if "train" in fl:
                     inner_zips["train"] = fpath
-                elif "dev" in fl or "valid" in fl:
-                    inner_zips["dev"] = fpath
 
         for split, zip_path in inner_zips.items():
-            dest = train_dir if split == "train" else dev_dir
+            dest = train_dir
             os.makedirs(dest, exist_ok=True)
             print(f"[⤓] Extracting {split} from {os.path.basename(zip_path)}...")
             with zipfile.ZipFile(zip_path, "r") as zf:

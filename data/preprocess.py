@@ -389,21 +389,17 @@ def preprocess_mind(
     os.makedirs(processed_dir, exist_ok=True)
 
     train_dir = os.path.join(raw_dir, dataset, "train")
-    dev_dir = os.path.join(raw_dir, dataset, "dev")
 
     # --- Parse news ---
     print("=" * 60)
     print("Stage 1/6: Parsing news articles")
     print("=" * 60)
     train_news = parse_news_tsv(os.path.join(train_dir, "news.tsv"))
-    dev_news = parse_news_tsv(os.path.join(dev_dir, "news.tsv"))
-    # Merge — dev may have articles not in train
-    all_news = {**train_news, **dev_news}
-    print(f"  Total unique articles: {len(all_news)}")
+    print(f"  Total unique articles: {len(train_news)}")
 
     # --- Build vocabs ---
     print("\nStage 2/6: Building vocabularies")
-    news_id2idx, cat2idx, subcat2idx = build_vocabs(all_news)
+    news_id2idx, cat2idx, subcat2idx = build_vocabs(train_news)
 
     # --- Compute text embeddings ---
     print("\nStage 3/6: Computing MiniLM text embeddings")
@@ -413,7 +409,7 @@ def preprocess_mind(
         text_embeddings = np.load(emb_path)
     else:
         text_embeddings = compute_text_embeddings(
-            all_news, news_id2idx, model_name=minilm_model
+            train_news, news_id2idx, model_name=minilm_model
         )
         np.save(emb_path, text_embeddings)
         print(f"  Saved embeddings to {emb_path}")
@@ -422,22 +418,18 @@ def preprocess_mind(
     # --- Build article features ---
     print("\nStage 4/6: Building article features")
     cat_ids, subcat_ids, entity_flags = build_article_features(
-        all_news, news_id2idx, cat2idx, subcat2idx
+        train_news, news_id2idx, cat2idx, subcat2idx
     )
 
     # --- Parse behaviors and build sequences ---
     print("\nStage 5/6: Parsing behaviors and building user sequences")
     train_behaviors = parse_behaviors_tsv(os.path.join(train_dir, "behaviors.tsv"))
-    dev_behaviors = parse_behaviors_tsv(os.path.join(dev_dir, "behaviors.tsv"))
-
     train_users = build_user_sequences(train_behaviors, news_id2idx, max_seq_len)
-    dev_users = build_user_sequences(dev_behaviors, news_id2idx, max_seq_len)
 
     # Stats
     train_hist_lens = [len(v["history_ids"]) for v in train_users.values()]
     print(f"  Train users: {len(train_users)}")
     print(f"  Train avg history: {np.mean(train_hist_lens):.1f}, median: {np.median(train_hist_lens):.1f}")
-    print(f"  Dev users: {len(dev_users)}")
 
     # --- Extract co-click pairs and hard negatives ---
     print("\nStage 6/6: Extracting co-click pairs and hard negatives")
@@ -462,7 +454,6 @@ def preprocess_mind(
         },
         "text_embeddings": text_embeddings,
         "train_users": train_users,
-        "dev_users": dev_users,
         "coclick_pairs": coclick_pairs,
         "hard_negatives": hard_negatives,
     }
