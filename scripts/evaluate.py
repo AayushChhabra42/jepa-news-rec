@@ -44,7 +44,10 @@ def evaluate_jepa(
     subcat_ids_np = data["article_features"]["subcat_ids"]
     entity_flags_np = data["article_features"]["entity_flags"]
     vocabs = data["vocabs"]
-    dev_users = data["dev_users"]
+    train_users_all = data["train_users"]
+    user_ids = list(train_users_all.keys())
+    split_idx = int(len(user_ids) * 0.9)
+    dev_users = {uid: train_users_all[uid] for uid in user_ids[split_idx:]}
 
     cat_ids = torch.tensor(cat_ids_np, dtype=torch.long, device=device)
     subcat_ids = torch.tensor(subcat_ids_np, dtype=torch.long, device=device)
@@ -142,7 +145,11 @@ def evaluate_xgb(
     text_embeddings = data["text_embeddings"]
     cat_ids = data["article_features"]["cat_ids"]
     vocabs = data["vocabs"]
-    dev_users = data["dev_users"]
+    train_users_all = data["train_users"]
+    user_ids = list(train_users_all.keys())
+    split_idx = int(len(user_ids) * 0.9)
+    train_users = {uid: train_users_all[uid] for uid in user_ids[:split_idx]}
+    dev_users = {uid: train_users_all[uid] for uid in user_ids[split_idx:]}
 
     from baselines.xgboost_ranker import (
         compute_user_profiles, compute_global_ctr, build_features
@@ -152,9 +159,8 @@ def evaluate_xgb(
     num_categories = len(vocabs["cat2idx"])
 
     # Profiles and CTR (from training data)
-    train_users = data["train_users"]
     user_profiles = compute_user_profiles(
-        {**train_users, **dev_users}, cat_ids, text_embeddings, num_categories
+        train_users_all, cat_ids, text_embeddings, num_categories
     )
 
     raw_dir = processed_dir.replace("processed", "raw")

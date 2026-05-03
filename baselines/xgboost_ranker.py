@@ -191,8 +191,13 @@ def train_xgb(
     text_embeddings = data["text_embeddings"]
     cat_ids = data["article_features"]["cat_ids"]
     vocabs = data["vocabs"]
-    train_users = data["train_users"]
-    dev_users = data["dev_users"]
+    train_users_all = data["train_users"]
+    
+    # Create a dev split from train users (last 10%)
+    user_ids = list(train_users_all.keys())
+    split_idx = int(len(user_ids) * 0.9)
+    train_users = {uid: train_users_all[uid] for uid in user_ids[:split_idx]}
+    dev_users = {uid: train_users_all[uid] for uid in user_ids[split_idx:]}
 
     # Re-parse behaviors for CTR computation
     from data.preprocess import parse_behaviors_tsv
