@@ -49,13 +49,18 @@ class CoClickDataset(Dataset):
             "positive_ent": self.entity_flags[p_idx],
         }
 
-        if self.hard_negatives is not None and a_idx in self.hard_negatives:
-            negs = self.hard_negatives[a_idx]
-            # Sample num_hard_neg negatives
-            if len(negs) >= self.num_hard_neg:
-                chosen = np.random.choice(negs, self.num_hard_neg, replace=False)
+        if self.hard_negatives is not None:
+            if a_idx in self.hard_negatives and len(self.hard_negatives[a_idx]) > 0:
+                negs = self.hard_negatives[a_idx]
+                if len(negs) >= self.num_hard_neg:
+                    chosen = np.random.choice(negs, self.num_hard_neg, replace=False)
+                else:
+                    chosen = np.random.choice(negs, self.num_hard_neg, replace=True)
             else:
-                chosen = np.random.choice(negs, self.num_hard_neg, replace=True)
+                # Fallback to random negative sampling (easy negatives)
+                # valid article IDs are 1 to len(cat_ids) - 1
+                chosen = np.random.randint(1, len(self.cat_ids), size=self.num_hard_neg)
+                
             item["hard_neg_ids"] = chosen
             item["hard_neg_cats"] = self.cat_ids[chosen]
             item["hard_neg_subcats"] = self.subcat_ids[chosen]
@@ -77,7 +82,11 @@ def collate_fn(batch):
         "positive_ent_flags": torch.tensor([b["positive_ent"] for b in batch], dtype=torch.float),
     }
 
-    if "hard_neg_ids" in batch[0]:
+    # Only include hard negatives if ALL items in the batch have them.
+    # Otherwise we'd have tensor shape mismatches.
+    has_hard_negs = all("hard_neg_ids" in b for b in batch)
+    
+    if has_hard_negs:
         result["hard_negative_ids"] = torch.tensor(
             np.stack([b["hard_neg_ids"] for b in batch]), dtype=torch.long
         )
