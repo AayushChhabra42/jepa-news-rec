@@ -22,7 +22,7 @@ KAGGLE_DATASET = "arashnic/mind-news-dataset"
 
 
 def _ensure_kaggle():
-    """Ensure kaggle CLI is available."""
+    """Ensure kaggle package is available."""
     try:
         import kaggle  # noqa: F401
     except ImportError:
@@ -35,6 +35,9 @@ def download_mind_kaggle(raw_dir: str = "data/raw", dataset: str = "mind-small")
 
     The Kaggle mirror (arashnic/mind-news-dataset) contains both
     MINDsmall_train.zip and MINDsmall_dev.zip inside a single download.
+
+    Uses the kaggle Python API directly (not the CLI, which requires
+    __main__.py that the kaggle package doesn't provide).
 
     Args:
         raw_dir: Root directory for raw data.
@@ -56,18 +59,17 @@ def download_mind_kaggle(raw_dir: str = "data/raw", dataset: str = "mind-small")
         print(f"    dev:   {dev_dir}")
         return {"train": train_dir, "dev": dev_dir}
 
-    # Download from Kaggle
+    # Download from Kaggle using the Python API
     kaggle_dl_dir = os.path.join(raw_dir, "kaggle_download")
     os.makedirs(kaggle_dl_dir, exist_ok=True)
 
     print(f"[↓] Downloading MIND dataset from Kaggle ({KAGGLE_DATASET})...")
     print("    (Make sure KAGGLE_USERNAME and KAGGLE_KEY are set, or ~/.kaggle/kaggle.json exists)")
 
-    subprocess.check_call([
-        sys.executable, "-m", "kaggle", "datasets", "download",
-        "-d", KAGGLE_DATASET,
-        "-p", kaggle_dl_dir,
-    ])
+    from kaggle.api.kaggle_api_extended import KaggleApi
+    api = KaggleApi()
+    api.authenticate()
+    api.dataset_download_files(KAGGLE_DATASET, path=kaggle_dl_dir, unzip=False)
 
     # Find the downloaded zip(s)
     zips = glob.glob(os.path.join(kaggle_dl_dir, "*.zip"))
