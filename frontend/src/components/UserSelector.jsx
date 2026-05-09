@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchUsers } from "../api/client";
+import { apiBaseUrl, fetchUsers } from "../api/client";
 import ErrorBanner from "./shared/ErrorBanner";
 import LoadingSpinner from "./shared/LoadingSpinner";
 
@@ -46,6 +46,7 @@ export default function UserSelector({ selectedUserId, onSelect }) {
           {(data.total ?? users.length).toLocaleString()} users available
         </div>
       )}
+      <div className="break-all text-[11px] leading-4 text-slate-400">API: {apiBaseUrl}</div>
     </aside>
   );
 }
