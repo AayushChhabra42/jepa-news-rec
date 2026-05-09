@@ -154,7 +154,7 @@ def _find_raw_news(settings: Settings) -> dict[str, dict[str, Any]]:
     seen: set[Path] = set()
     for path in candidates:
         path = path.resolve()
-        if path in seen or not path.exists():
+        if path in seen or not path.is_file():
             continue
         seen.add(path)
         parsed = _parse_news_tsv(path)
