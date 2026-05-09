@@ -41,7 +41,11 @@ export default function UserSelector({ selectedUserId, onSelect }) {
           </button>
         ))}
       </div>
-      {data && <div className="text-xs text-slate-500">{data.total.toLocaleString()} users available</div>}
+      {data && (
+        <div className="text-xs text-slate-500">
+          {(data.total ?? users.length).toLocaleString()} users available
+        </div>
+      )}
     </aside>
   );
 }

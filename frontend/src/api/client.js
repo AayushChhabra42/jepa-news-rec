@@ -12,9 +12,13 @@ export async function fetchHealth() {
 
 export async function fetchUsers({ page = 1, pageSize = 50, search = "" } = {}) {
   const { data } = await api.get("/users", { params: { page, page_size: pageSize } });
-  if (!search) return data;
+  const payload = Array.isArray(data)
+    ? { users: data, page, page_size: pageSize, total: data.length }
+    : { users: data.users ?? [], page: data.page ?? page, page_size: data.page_size ?? pageSize, total: data.total ?? data.users?.length ?? 0 };
+  if (!search) return payload;
   const needle = search.toLowerCase();
-  return { ...data, users: data.users.filter((user) => user.toLowerCase().includes(needle)) };
+  const users = payload.users.filter((user) => String(user).toLowerCase().includes(needle));
+  return { ...payload, users, total: payload.total || users.length };
 }
 
 export async function fetchUserProfile(userId) {
