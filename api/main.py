@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.config import get_settings
 from api.routers import recommendations, users
 from api.schemas import HealthResponse
-from api.services import data_service, jepa_service
+from api.services import data_service, jepa_service, xgb_service
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -20,7 +20,11 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     store = data_service.load_data(settings)
     jepa_service.load_jepa(settings, store)
-    logger.info("Startup complete: JEPA artifacts loaded")
+    if settings.enable_xgb:
+        xgb_service.load_xgb(settings, store)
+        logger.info("Startup complete: JEPA and XGBoost artifacts loaded")
+    else:
+        logger.info("Startup complete: JEPA artifacts loaded")
     yield
 
 

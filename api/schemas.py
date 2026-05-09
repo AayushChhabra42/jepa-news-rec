@@ -54,6 +54,10 @@ class RecommendationItem(BaseModel):
     abstract: str
     jepa_score: float
     xgb_score: float | None = None
+    jepa_rank: int | None = None
+    xgb_rank: int | None = None
+    final_rank: int | None = None
+    rank_delta: int | None = None
     label: int | None = None
 
 
@@ -65,7 +69,7 @@ class Metrics(BaseModel):
 
 
 class RecommendationsResponse(BaseModel):
-    stage: Literal["jepa"]
+    stage: Literal["jepa", "xgb", "both"]
     user_id: str
     recommendations: list[RecommendationItem]
     metrics: Metrics

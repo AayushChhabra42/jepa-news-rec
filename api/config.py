@@ -18,7 +18,8 @@ class Settings(BaseSettings):
     processed_dir: Path = Field(default=ROOT_DIR / "data" / "processed")
     checkpoint_path: Path = Field(default=ROOT_DIR / "checkpoints" / "jepa_best.pt")
     finetuned_checkpoint_path: Path = Field(default=ROOT_DIR / "checkpoints" / "finetuned_model.pt")
-    xgb_checkpoint_path: Path = Field(default=ROOT_DIR / "checkpoints" / "xgb_ranker.pkl")
+    xgb_checkpoint_path: Path = Field(default=ROOT_DIR / "checkpoints" / "xgb_ranker.json")
+    enable_xgb: bool = False
     top_k_default: int = 50
     max_seq_len: int = 50
     predictor_type: str = "transformer"

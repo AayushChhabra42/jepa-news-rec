@@ -15,14 +15,31 @@ function scoreColor(score) {
   return "bg-red-500";
 }
 
+function rankDeltaLabel(delta) {
+  if (delta == null) return null;
+  if (delta > 0) return { text: `up ${delta}`, className: "bg-emerald-50 text-emerald-700" };
+  if (delta < 0) return { text: `down ${Math.abs(delta)}`, className: "bg-red-50 text-red-700" };
+  return { text: "=", className: "bg-slate-100 text-slate-600" };
+}
+
 export default function ArticleCard({ article, labelReveal }) {
   const normalized = Math.max(0, Math.min(1, (article.jepa_score + 1) / 2));
+  const rank = article.final_rank ?? article.rank;
+  const delta = rankDeltaLabel(article.rank_delta);
+
   return (
     <article className="relative rounded-md border border-slate-200 bg-white p-4 pl-12 shadow-sm">
       <div className="absolute left-3 top-3 flex h-7 w-7 items-center justify-center rounded bg-slate-950 text-xs font-semibold text-white">
-        {article.rank}
+        {rank}
       </div>
       <div className="line-clamp-2 min-h-10 text-sm font-semibold leading-5 text-slate-950">{article.title}</div>
+      {(article.jepa_rank || article.xgb_rank) && (
+        <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+          {article.jepa_rank && <span>JEPA #{article.jepa_rank}</span>}
+          {article.xgb_rank && <span>XGB #{article.xgb_rank}</span>}
+          {delta && <span className={`rounded px-2 py-0.5 font-semibold ${delta.className}`}>{delta.text}</span>}
+        </div>
+      )}
       <div className="mt-2 flex flex-wrap gap-2 text-xs">
         <span className={`rounded px-2 py-1 ${categoryClasses[article.category] || "bg-slate-100 text-slate-700"}`}>
           {article.category}
@@ -40,10 +57,12 @@ export default function ArticleCard({ article, labelReveal }) {
             <div className={`h-full rounded ${scoreColor(normalized)}`} style={{ width: `${normalized * 100}%` }} />
           </div>
         </div>
-        <div className="flex items-center justify-between text-xs">
-          <span className="rounded bg-slate-100 px-2 py-1 text-slate-500">XGB score: — Stage 2</span>
+        <div className="flex items-center justify-between gap-3 text-xs">
+          <span className="rounded bg-slate-100 px-2 py-1 text-slate-500">
+            XGB score: {article.xgb_score == null ? "-- Stage 2" : article.xgb_score.toFixed(3)}
+          </span>
           <span className={`rounded px-2 py-1 font-semibold ${labelReveal ? (article.label === 1 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700") : "bg-slate-100 text-slate-400 blur-[2px]"}`}>
-            {labelReveal ? (article.label === 1 ? "✓ clicked" : "✗ not clicked") : "hidden"}
+            {labelReveal ? (article.label === 1 ? "clicked" : "not clicked") : "hidden"}
           </span>
         </div>
       </div>
