@@ -119,6 +119,66 @@ def _normalise_news(news_obj: Any, vocabs: dict[str, Any] | None, text_embedding
     return news_by_id, news_by_idx, idx_to_news_id
 
 
+def _parse_news_tsv(path: Path) -> dict[str, dict[str, Any]]:
+    news: dict[str, dict[str, Any]] = {}
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 8:
+                parts += [""] * (8 - len(parts))
+            news_id, category, subcategory, title, abstract, url, title_entities, abstract_entities = parts[:8]
+            news[news_id] = {
+                "news_id": news_id,
+                "category": category or "unknown",
+                "subcategory": subcategory or "unknown",
+                "title": title or news_id,
+                "abstract": abstract or "",
+                "url": url or "",
+                "title_entities": title_entities,
+                "abstract_entities": abstract_entities,
+            }
+    return news
+
+
+def _find_raw_news(settings: Settings) -> dict[str, dict[str, Any]]:
+    candidates = [
+        settings.processed_dir.parent / "raw" / "mind-small" / "train" / "news.tsv",
+        settings.processed_dir.parent / "raw" / "mind-small" / "dev" / "news.tsv",
+        settings.processed_dir.parent / "raw" / "MINDsmall_train" / "news.tsv",
+        settings.processed_dir.parent / "raw" / "MINDsmall_dev" / "news.tsv",
+    ]
+    for news_path in settings.processed_dir.parent.glob("raw/**/news.tsv"):
+        candidates.append(news_path)
+
+    merged: dict[str, dict[str, Any]] = {}
+    seen: set[Path] = set()
+    for path in candidates:
+        path = path.resolve()
+        if path in seen or not path.exists():
+            continue
+        seen.add(path)
+        parsed = _parse_news_tsv(path)
+        merged.update(parsed)
+        logger.info("Loaded %s article metadata rows from %s", len(parsed), path)
+    return merged
+
+
+def _merge_news_metadata(
+    news_by_id: dict[str, dict[str, Any]],
+    news_by_idx: dict[int, dict[str, Any]],
+    idx_to_news_id: dict[int, str],
+    metadata_by_id: dict[str, dict[str, Any]],
+) -> None:
+    for idx, news_id in idx_to_news_id.items():
+        metadata = metadata_by_id.get(news_id)
+        if not metadata:
+            continue
+        existing = news_by_idx.get(idx, {"news_id": news_id})
+        merged = {**existing, **metadata}
+        news_by_idx[idx] = merged
+        news_by_id[news_id] = merged
+
+
 def _extract_embeddings(news_obj: Any) -> np.ndarray | None:
     if hasattr(news_obj, "to_dict"):
         records = news_obj.to_dict("records")
@@ -210,6 +270,7 @@ def load_data(settings: Settings) -> DataStore:
         if settings.news_path.exists():
             news_obj = _load_pickle(settings.news_path)
         news_by_id, news_by_idx, idx_to_news_id = _normalise_news(news_obj, vocabs, text_embeddings)
+        _merge_news_metadata(news_by_id, news_by_idx, idx_to_news_id, _find_raw_news(settings))
         impressions = _normalise_impressions(None, users, vocabs.get("news_id2idx", {}))
         news_id_to_idx = dict(vocabs.get("news_id2idx", {}))
         cat_ids = np.asarray(features["cat_ids"], dtype=np.int64)
@@ -232,12 +293,18 @@ def load_data(settings: Settings) -> DataStore:
         if embedding_obj is None:
             raise ValueError(f"No embeddings found in {settings.news_path}")
         text_embeddings = embedding_obj.astype(np.float32)
-        news_id_to_idx = news_obj.get("news_id2idx", {})
+        news_id_to_idx = news_obj.get("news_id2idx", {}) if isinstance(news_obj, dict) else {}
         news_by_id, news_by_idx, idx_to_news_id = _normalise_news(news_obj, {"news_id2idx": news_id_to_idx}, text_embeddings)
+        _merge_news_metadata(news_by_id, news_by_idx, idx_to_news_id, _find_raw_news(settings))
         impressions = _normalise_impressions(raw_impressions, users, news_id_to_idx)
-        cat_ids = np.asarray(news_obj.get("cat_ids", np.zeros(len(text_embeddings))), dtype=np.int64)
-        subcat_ids = np.asarray(news_obj.get("subcat_ids", np.zeros(len(text_embeddings))), dtype=np.int64)
-        entity_flags = np.asarray(news_obj.get("entity_flags", np.zeros(len(text_embeddings))), dtype=np.float32)
+        if isinstance(news_obj, dict):
+            cat_ids = np.asarray(news_obj.get("cat_ids", np.zeros(len(text_embeddings))), dtype=np.int64)
+            subcat_ids = np.asarray(news_obj.get("subcat_ids", np.zeros(len(text_embeddings))), dtype=np.int64)
+            entity_flags = np.asarray(news_obj.get("entity_flags", np.zeros(len(text_embeddings))), dtype=np.float32)
+        else:
+            cat_ids = np.zeros(len(text_embeddings), dtype=np.int64)
+            subcat_ids = np.zeros(len(text_embeddings), dtype=np.int64)
+            entity_flags = np.zeros(len(text_embeddings), dtype=np.float32)
         num_categories = int(cat_ids.max()) + 1
         num_subcategories = int(subcat_ids.max()) + 1
 
@@ -309,6 +376,22 @@ def labels_for_user(user_id: str) -> dict[int, int]:
                 if article_idx is not None:
                     labels[article_idx] = int(label)
     return labels
+
+
+def labeled_candidate_ids_for_user(user_id: str) -> list[int]:
+    candidates: dict[int, None] = {}
+    for impression in get_store().impressions_by_user.get(user_id, []):
+        for idx in impression.get("candidates", []):
+            try:
+                article_idx = int(idx)
+            except (TypeError, ValueError):
+                resolved = idx_for_article_id(str(idx))
+                if resolved is None:
+                    continue
+                article_idx = resolved
+            if article_idx > 0:
+                candidates[article_idx] = None
+    return list(candidates.keys())
 
 
 def profile_features(history_ids: list[int]) -> dict[str, Any]:

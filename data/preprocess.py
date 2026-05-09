@@ -468,6 +468,28 @@ def preprocess_mind(
     with open(vocab_path, "wb") as f:
         pickle.dump(outputs["vocabs"], f)
 
+    # Save API-facing split artifacts with article metadata intact.
+    news_api = {
+        "articles": train_news,
+        "news_id2idx": news_id2idx,
+        "cat2idx": cat2idx,
+        "subcat2idx": subcat2idx,
+        "text_embeddings": text_embeddings,
+        "cat_ids": cat_ids,
+        "subcat_ids": subcat_ids,
+        "entity_flags": entity_flags,
+    }
+    with open(os.path.join(processed_dir, "news.pkl"), "wb") as f:
+        pickle.dump(news_api, f, protocol=pickle.HIGHEST_PROTOCOL)
+    with open(os.path.join(processed_dir, "user_sequences.pkl"), "wb") as f:
+        pickle.dump(train_users, f, protocol=pickle.HIGHEST_PROTOCOL)
+    with open(os.path.join(processed_dir, "impressions.pkl"), "wb") as f:
+        pickle.dump(
+            {uid: data["impressions"] for uid, data in train_users.items()},
+            f,
+            protocol=pickle.HIGHEST_PROTOCOL,
+        )
+
     # Save numpy arrays separately
     np.save(os.path.join(processed_dir, "cat_ids.npy"), cat_ids)
     np.save(os.path.join(processed_dir, "subcat_ids.npy"), subcat_ids)

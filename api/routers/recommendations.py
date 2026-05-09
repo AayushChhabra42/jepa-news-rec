@@ -26,7 +26,12 @@ def recommendations(
 
     service = jepa_service.get_service()
     labels_by_idx = data_service.labels_for_user(user_id)
-    scored = service.score_candidates(service.encode_user(user.get("history_ids", [])), top_k=top_k)
+    labeled_candidates = data_service.labeled_candidate_ids_for_user(user_id)
+    scored = service.score_candidates(
+        service.encode_user(user.get("history_ids", [])),
+        candidate_ids=labeled_candidates or None,
+        top_k=top_k,
+    )
 
     items: list[RecommendationItem] = []
     metric_labels: list[int | None] = []
