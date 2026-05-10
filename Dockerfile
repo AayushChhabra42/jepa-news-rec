@@ -14,6 +14,9 @@ COPY frontend/ ./frontend/
 WORKDIR /app/frontend
 RUN npm install && npm run build
 
+# Copy the built frontend to static directory
+RUN cp -r dist ../static
+
 # Copy backend code
 WORKDIR /app
 COPY api/ ./api/
@@ -22,9 +25,8 @@ COPY models/ ./models/
 COPY utils/ ./utils/
 COPY baselines/ ./baselines/
 COPY evaluation/ ./evaluation/
-
-# Add static files serving to FastAPI
-COPY --from=builder /app/frontend/dist ./static
+COPY scripts/ ./scripts/
+COPY data/ ./data/
 
 EXPOSE 8000
 
